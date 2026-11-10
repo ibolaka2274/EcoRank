@@ -560,25 +560,40 @@
             try {
                 const predictions = await aiModel.classify(elementToAnalyze);
 
-                // Genişletilmiş yapay zeka nesne etiket kümesi
-                const petKeywords = ['bottle', 'pop bottle', 'soda bottle', 'water bottle', 'plastic bottle', 'beverage bottle', 'water jug', 'flask', 'nipple', 'lotion'];
-                const glassKeywords = ['wine bottle', 'beer bottle', 'glass bottle', 'goblet', 'champagne', 'beaker', 'vase', 'carboy', 'pitcher'];
-                const plasticKeywords = ['pill bottle', 'container', 'bucket', 'jug', 'plastic', 'can', 'tub', 'soap dispenser'];
+                // Kesin ve spesifik nesne etiket kümeleri (Şişe dışı nesneler kabul edilmez)
+                const petKeywords = ['pop bottle', 'soda bottle', 'water bottle', 'plastic bottle', 'beverage bottle', 'water jug'];
+                const glassKeywords = ['wine bottle', 'beer bottle', 'glass bottle', 'carboy'];
+                const plasticKeywords = ['pill bottle', 'lotion bottle', 'shampoo bottle', 'detergent bottle'];
+
+                // Şişe/kap olduğunu doğrulayan ana kelimeler
+                const genericBottleKeywords = ['bottle', 'flask', 'jug', 'canteen'];
 
                 for (let pred of predictions) {
                     const label = pred.className.toLowerCase();
-                    // Algılama duyarlılığı optimize edildi (0.02 seviyesine çekildi)
-                    if (pred.probability > 0.02) {
+                    const prob = pred.probability;
+
+                    // Minimum %8 olasılık eşiği
+                    if (prob > 0.08) {
                         if (glassKeywords.some(k => label.includes(k))) return { type: 'glass', label: pred.className };
                         if (petKeywords.some(k => label.includes(k))) return { type: 'pet', label: pred.className };
                         if (plasticKeywords.some(k => label.includes(k))) return { type: 'plastic', label: pred.className };
+                        
+                        // Genel şişe tanımı yakalandıysa varsayılan olarak PET kabul et
+                        if (genericBottleKeywords.some(k => label.includes(k))) return { type: 'pet', label: pred.className };
                     }
                 }
 
-                // Otomatik modda tanımlanamadıysa varsayılan olarak pet/plastik şişe kabulü için esneklik sağlandı
-                return { type: selectedMaterial === 'auto' ? 'pet' : selectedMaterial, label: predictions[0] ? predictions[0].className : 'Geri Dönüşüm Atığı' };
+                // Otomatik modda hiçbir şişe/kap türü bulunamadıysa KESİNLİKLE GEÇERSİZ olarak döndür
+                if (selectedMaterial === 'auto') {
+                    return { 
+                        type: 'invalid', 
+                        label: predictions[0] ? predictions[0].className : 'Şişe / Atık Nesnesi Değil' 
+                    };
+                }
+
+                return { type: selectedMaterial, label: 'Manuel Seçim Modu' };
             } catch (err) {
-                return { type: selectedMaterial === 'auto' ? 'pet' : selectedMaterial, label: 'Atık Tarama' };
+                return { type: selectedMaterial === 'auto' ? 'invalid' : selectedMaterial, label: 'Hata' };
             }
         }
 
