@@ -1,0 +1,797 @@
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoRank - Interaktif Geri Dönüşüm Asistanı</title>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Tailwind CSS Script -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+    <!-- Canvas Confetti for Level-Up effects -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <!-- TensorFlow.js & MobileNet AI for Real Object Recognition -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+
+    <!-- Firebase SDK Entegrasyonu (Kullanıcı İlerlemesini Saklama) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ecorank-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "demo-api-key",
+            authDomain: "demo-app.firebaseapp.com",
+            projectId: "demo-app",
+            storageBucket: "demo-app.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:demo"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        window.firebaseApp = { app, db, auth, appId };
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ecoGreen: '#10B981',
+                        ecoDarkGreen: '#059669',
+                        ecoBg: '#0F172A',
+                        ecoCard: '#1E293B',
+                        ecoLight: '#F8FAFC',
+                        ecoAccent: '#0EA5E9'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        heading: ['Outfit', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0F172A;
+            color: #F8FAFC;
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .scanning-bar {
+            animation: scanline 1.5s infinite linear;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0F172A; }
+        ::-webkit-scrollbar-thumb { background: #10B981; border-radius: 2px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between items-center p-4 max-w-md mx-auto relative overflow-x-hidden">
+
+    <!-- TOP BAR: User Profile & Rank Overview -->
+    <header class="w-full bg-ecoCard/90 border-b border-emerald-500/30 p-4 rounded-2xl backdrop-blur-md sticky top-0 z-30 shadow-xl">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div id="rankIconContainer" class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center p-1 relative shadow-inner">
+                    <span id="rankBadgeIcon" class="text-2xl text-emerald-400"><i class="fa-solid fa-seedling"></i></span>
+                </div>
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Geri Dönüşüm Seviyesi</div>
+                    <div id="rankNameDisplay" class="text-xl font-bold font-heading leading-none tracking-wide text-emerald-400">DEMİR I</div>
+                </div>
+            </div>
+
+            <div class="text-right">
+                <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Toplam Puan</div>
+                <div id="totalScoreDisplay" class="text-2xl font-bold font-heading leading-none text-sky-400">0 PTS</div>
+            </div>
+        </div>
+
+        <!-- Rank Progress Bar -->
+        <div class="mt-3.5">
+            <div class="flex justify-between text-xs font-semibold text-slate-300 mb-1.5">
+                <span id="currentRankTierLabel">Demir I</span>
+                <span id="nextRankTierLabel" class="text-emerald-400">Demir II</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                <div id="rankProgressBar" class="bg-gradient-to-r from-emerald-500 to-sky-400 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div id="pointsToNextDisplay" class="text-[11px] text-right text-slate-400 mt-1">Sonraki dereceye: 100 Puan kaldı</div>
+        </div>
+    </header>
+
+    <!-- MAIN VIEW AREA -->
+    <main class="w-full my-4 flex-1 flex flex-col space-y-4">
+
+        <!-- CAMERA / PREVIEW SECTION -->
+        <div class="relative w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 aspect-[4/3] flex items-center justify-center shadow-2xl">
+            
+            <!-- Live Camera Stream -->
+            <video id="webcam" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+
+            <!-- Image Preview Canvas/Img -->
+            <img id="imagePreview" class="w-full h-full object-cover hidden" alt="Atık Önizleme">
+
+            <!-- Default Placeholder Container -->
+            <div id="placeholderUI" class="text-center p-6 flex flex-col items-center">
+                <div class="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-3xl mb-3 animate-pulse">
+                    <i class="fa-solid fa-recycle"></i>
+                </div>
+                <p class="text-sm text-slate-200 font-medium">Atık Fotoğrafı Çekin veya Seçin</p>
+                <p class="text-xs text-slate-400 mt-1">Cam (+200), Plastik (+100), PET (+50)</p>
+            </div>
+
+            <!-- Scanning Radar Effect Layer -->
+            <div id="scanOverlay" class="absolute inset-0 hidden pointer-events-none flex flex-col justify-between p-4 bg-emerald-500/5">
+                <div class="w-full h-1 bg-emerald-400 shadow-[0_0_15px_#10B981] scanning-bar"></div>
+                <div class="flex justify-between items-center text-xs font-mono text-emerald-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-emerald-500/30">
+                    <span><i class="fa-solid fa-magnifying-glass mr-1 animate-pulse"></i> ATIK ANALİZ EDİLİYOR...</span>
+                    <span id="scanPercent">0%</span>
+                </div>
+            </div>
+
+            <!-- AI Model Loading Indicator -->
+            <div id="aiLoadingBadge" class="absolute bottom-3 left-3 bg-slate-900/80 border border-emerald-500/40 text-emerald-400 text-xs px-2.5 py-1 rounded-lg flex items-center space-x-1.5 backdrop-blur-md">
+                <i class="fa-solid fa-circle-notch animate-spin text-[10px]"></i>
+                <span id="aiStatusText">Görsel Doğrulama Hazırlanıyor...</span>
+            </div>
+
+            <!-- Camera Controls Overlay -->
+            <div class="absolute top-3 right-3 flex space-x-2">
+                <button id="switchCamBtn" title="Kamerayı Değiştir" class="bg-slate-900/80 text-white p-2.5 rounded-xl border border-slate-700 hover:border-emerald-400 text-xs hidden backdrop-blur">
+                    <i class="fa-solid fa-rotate"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- CAMERA & CAPTURE ACTION BUTTONS -->
+        <div class="grid grid-cols-2 gap-3">
+            <button id="startCamBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold py-3 px-4 rounded-xl border border-slate-700 flex items-center justify-center space-x-2 text-sm transition">
+                <i class="fa-solid fa-camera text-emerald-400"></i>
+                <span>Kamerayı Aç</span>
+            </button>
+
+            <label class="bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold py-3 px-4 rounded-xl border border-slate-700 flex items-center justify-center space-x-2 text-sm cursor-pointer transition">
+                <i class="fa-solid fa-image text-sky-400"></i>
+                <span>Galeriden Seç</span>
+                <input type="file" id="fileInput" accept="image/*" class="hidden">
+            </label>
+        </div>
+
+        <!-- MANUAL MATERIAL SELECTOR / AI OVERRIDE FOR TESTING -->
+        <div class="bg-slate-800/60 p-3.5 rounded-2xl border border-slate-700/60">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5 flex justify-between items-center">
+                <span>Materyal Tipi Seçimi</span>
+                <i class="fa-solid fa-sliders text-emerald-400"></i>
+            </div>
+            <div class="grid grid-cols-4 gap-2">
+                <button data-type="auto" class="mat-select-btn bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-400 p-2 rounded-xl text-center transition active:scale-95 ring-2 ring-emerald-500">
+                    <i class="fa-solid fa-wand-magic-sparkles text-base block mb-1"></i>
+                    <span class="text-[11px] font-bold block">OTOMATİK</span>
+                    <span class="text-[9px] text-emerald-300/80">Akıllı Tespit</span>
+                </button>
+                <button data-type="glass" class="mat-select-btn bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-400 p-2 rounded-xl text-center transition active:scale-95">
+                    <i class="fa-solid fa-bottle-droplet text-base block mb-1"></i>
+                    <span class="text-[11px] font-bold block">CAM</span>
+                    <span class="text-[9px] text-slate-400">+200 PTS</span>
+                </button>
+                <button data-type="plastic" class="mat-select-btn bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sky-400 p-2 rounded-xl text-center transition active:scale-95">
+                    <i class="fa-solid fa-box text-base block mb-1"></i>
+                    <span class="text-[11px] font-bold block">PLASTİK</span>
+                    <span class="text-[9px] text-slate-400">+100 PTS</span>
+                </button>
+                <button data-type="pet" class="mat-select-btn bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-400 p-2 rounded-xl text-center transition active:scale-95">
+                    <i class="fa-solid fa-bottle-water text-base block mb-1"></i>
+                    <span class="text-[11px] font-bold block">PET ŞİŞE</span>
+                    <span class="text-[9px] text-slate-400">+50 PTS</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- MAIN SCAN TRIGGER BUTTON -->
+        <button id="analyzeBtn" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-4 rounded-2xl shadow-lg border border-emerald-400/30 flex items-center justify-center space-x-2 text-base font-heading tracking-wide uppercase transition transform active:scale-98">
+            <i class="fa-solid fa-leaf text-emerald-200"></i>
+            <span>FOTOĞRAFI ANALİZ ET VE PUAN KAZAN</span>
+        </button>
+
+        <!-- ECO RESPONSE CARD -->
+        <div id="responseCard" class="hidden bg-slate-800 border border-emerald-500/40 rounded-2xl p-4 shadow-2xl relative overflow-hidden">
+            <div class="flex justify-between items-start mb-3 border-b border-slate-700/60 pb-2.5">
+                <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center">
+                    <i class="fa-solid fa-circle-check mr-1.5 text-emerald-400"></i> ATIK ANALİZ RAPORU
+                </span>
+                <span id="scanTimestamp" class="text-[11px] text-slate-400 font-mono">14:20:05</span>
+            </div>
+
+            <!-- FORMAT ITEM 1: ANALİZ -->
+            <div class="mb-3">
+                <div class="text-xs text-slate-400 font-semibold uppercase">1. Analiz</div>
+                <div id="resAnalysis" class="text-sm font-semibold text-slate-100 mt-1 pl-2.5 border-l-2 border-emerald-400">
+                    Tespit edilen nesne: Cam Şişe (Kategori: Cam)
+                </div>
+            </div>
+
+            <!-- FORMAT ITEM 2: KAZANILAN PUAN -->
+            <div class="mb-3">
+                <div class="text-xs text-slate-400 font-semibold uppercase">2. Kazanılan Puan</div>
+                <div class="flex items-center space-x-2 mt-1">
+                    <span id="resEarnedPoints" class="text-2xl font-heading font-bold text-emerald-400 leading-none">+200 PUAN</span>
+                    <span class="bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">BAŞARILI</span>
+                </div>
+            </div>
+
+            <!-- FORMAT ITEM 3: TOPLAM PUAN VE DERECE -->
+            <div class="bg-slate-900/80 p-3.5 rounded-xl border border-slate-700/80">
+                <div class="text-xs text-slate-400 font-semibold uppercase">3. Toplam Puan ve Derece</div>
+                <div id="resTotalAndRank" class="text-base font-bold text-slate-100 mt-1 font-heading tracking-wide">
+                    Güncel Puan: 450 PTS | Derece: BRONZ II
+                </div>
+                <div id="resValorantQuote" class="text-xs font-medium italic text-emerald-300/90 mt-1.5 border-t border-slate-800 pt-1.5">
+                    "Tebrikler! Doğaya katkın katlanarak devam ediyor."
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- FOOTER & SETTINGS -->
+    <footer class="w-full py-3 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+        <button id="resetDataBtn" class="hover:text-rose-400 transition flex items-center">
+            <i class="fa-solid fa-rotate-left mr-1"></i> İlerlemeyi Sıfırla
+        </button>
+        <span>EcoRank • Doğa Dostu İlerleme</span>
+    </footer>
+
+    <!-- AUDIO EFFECTS -->
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            playScan() {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+
+            playScore() {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const notes = [440, 554.37, 659.25, 880];
+                notes.forEach((freq, index) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime + (index * 0.07));
+                    gain.gain.setValueAtTime(0.12, this.ctx.currentTime + (index * 0.07));
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + (index * 0.07) + 0.12);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + (index * 0.07));
+                    osc.stop(this.ctx.currentTime + (index * 0.07) + 0.12);
+                });
+            }
+
+            playRankUp() {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(261.63, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(783.99, this.ctx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+        }
+
+        const sfx = new SoundFX();
+    </script>
+
+    <!-- MAIN APP LOGIC -->
+    <script>
+        // Clean Eco Ranks Table (Cumulative Thresholds)
+        const RANKS = [
+            { name: "Demir I", min: 0, max: 100, icon: "fa-seedling", color: "text-slate-400" },
+            { name: "Demir II", min: 101, max: 200, icon: "fa-seedling", color: "text-slate-400" },
+            { name: "Demir III", min: 201, max: 300, icon: "fa-seedling", color: "text-slate-400" },
+            
+            { name: "Bronz I", min: 301, max: 433, icon: "fa-leaf", color: "text-amber-600" },
+            { name: "Bronz II", min: 434, max: 566, icon: "fa-leaf", color: "text-amber-600" },
+            { name: "Bronz III", min: 567, max: 700, icon: "fa-leaf", color: "text-amber-600" },
+            
+            { name: "Gümüş I", min: 701, max: 866, icon: "fa-tree", color: "text-slate-300" },
+            { name: "Gümüş II", min: 867, max: 1033, icon: "fa-tree", color: "text-slate-300" },
+            { name: "Gümüş III", min: 1034, max: 1200, icon: "fa-tree", color: "text-slate-300" },
+            
+            { name: "Altın I", min: 1201, max: 1400, icon: "fa-award", color: "text-yellow-400" },
+            { name: "Altın II", min: 1401, max: 1600, icon: "fa-award", color: "text-yellow-400" },
+            { name: "Altın III", min: 1601, max: 1800, icon: "fa-award", color: "text-yellow-400" },
+            
+            { name: "Platin I", min: 1801, max: 2033, icon: "fa-earth-americas", color: "text-cyan-400" },
+            { name: "Platin II", min: 2034, max: 2266, icon: "fa-earth-americas", color: "text-cyan-400" },
+            { name: "Platin III", min: 2267, max: 2500, icon: "fa-earth-americas", color: "text-cyan-400" },
+            
+            { name: "Elmas I", min: 2501, max: 2766, icon: "fa-gem", color: "text-teal-400" },
+            { name: "Elmas II", min: 2767, max: 3033, icon: "fa-gem", color: "text-teal-400" },
+            { name: "Elmas III", min: 3034, max: 3300, icon: "fa-gem", color: "text-teal-400" },
+            
+            { name: "Yücelik I", min: 3301, max: 3600, icon: "fa-shield-heart", color: "text-emerald-400" },
+            { name: "Yücelik II", min: 3601, max: 3900, icon: "fa-shield-heart", color: "text-emerald-400" },
+            { name: "Yücelik III", min: 3901, max: 4200, icon: "fa-shield-heart", color: "text-emerald-400" },
+            
+            { name: "Ölümsüzlük", min: 4201, max: 5500, icon: "fa-[#0EA5E9]", iconClass: "fa-hands-holding-circle", color: "text-sky-400" },
+            { name: "Radyant", min: 5501, max: 999999, icon: "fa-crown", color: "text-amber-300" }
+        ];
+
+        // Environmental Motivational Quotes
+        const ECO_QUOTES = [
+            "Tebrikler! Her geri dönüşüm geleceğe temiz bir nefes bırakır.",
+            "Harika bir adım! Doğanın dengesini korumaya katkı sağladın.",
+            "Geri dönüşüm bilincinle çevreye örnek oluyorsun!",
+            "Tebrikler! Doğayı koruma yolunda bir kademe daha ilerledin.",
+            "Küçük adımlar, büyük yeşil değişimler yaratır!"
+        ];
+
+        // State variables
+        let totalScore = parseInt(localStorage.getItem('ecoRank_score')) || 0;
+        let selectedMaterial = 'auto';
+        let videoStream = null;
+        let facingMode = 'environment';
+        let aiModel = null;
+        
+        let scannedHashes = JSON.parse(localStorage.getItem('ecoRank_hashes')) || [];
+        let currentUserId = null;
+
+        // Initialize Firebase Authentication & Cloud Storage Synchronization
+        async function initCloudStorage() {
+            if (!window.firebaseApp) return;
+
+            const { auth, db, appId } = window.firebaseApp;
+            const { signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const { doc, setDoc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (!user) return;
+                currentUserId = user.uid;
+
+                const userDocRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'userData');
+
+                onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (typeof data.score === 'number' && data.score > totalScore) {
+                            totalScore = data.score;
+                            localStorage.setItem('ecoRank_score', totalScore);
+                        }
+                        if (Array.isArray(data.scannedHashes)) {
+                            scannedHashes = Array.from(new Set([...scannedHashes, ...data.scannedHashes]));
+                            localStorage.setItem('ecoRank_hashes', JSON.stringify(scannedHashes));
+                        }
+                        updateRankUI();
+                    } else {
+                        setDoc(userDocRef, { score: totalScore, scannedHashes: scannedHashes }, { merge: true });
+                    }
+                }, (error) => {
+                    console.warn("Bulut senkronizasyonu:", error);
+                });
+            });
+        }
+
+        async function saveCloudProgress() {
+            if (!currentUserId || !window.firebaseApp) return;
+            try {
+                const { db, appId } = window.firebaseApp;
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const userDocRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'profile', 'userData');
+                await setDoc(userDocRef, { score: totalScore, scannedHashes: scannedHashes }, { merge: true });
+            } catch (err) {
+                console.warn("Bulut kaydetme hatası:", err);
+            }
+        }
+
+        async function loadAIModel() {
+            const aiStatusText = document.getElementById('aiStatusText');
+            try {
+                aiModel = await mobilenet.load({ version: 2, alpha: 1.0 });
+                aiStatusText.innerText = "Görsel Doğrulama Aktif";
+                aiStatusText.parentElement.classList.remove('border-emerald-500/40', 'text-emerald-400');
+                aiStatusText.parentElement.classList.add('border-emerald-400', 'text-emerald-300');
+            } catch (err) {
+                console.error("AI Model yüklenemedi", err);
+                aiStatusText.innerText = "Standart Mod";
+            }
+            initCloudStorage();
+        }
+        window.addEventListener('load', loadAIModel);
+
+        const totalScoreDisplay = document.getElementById('totalScoreDisplay');
+        const rankNameDisplay = document.getElementById('rankNameDisplay');
+        const rankBadgeIcon = document.getElementById('rankBadgeIcon');
+        const currentRankTierLabel = document.getElementById('currentRankTierLabel');
+        const nextRankTierLabel = document.getElementById('nextRankTierLabel');
+        const rankProgressBar = document.getElementById('rankProgressBar');
+        const pointsToNextDisplay = document.getElementById('pointsToNextDisplay');
+        
+        const webcam = document.getElementById('webcam');
+        const imagePreview = document.getElementById('imagePreview');
+        const placeholderUI = document.getElementById('placeholderUI');
+        const startCamBtn = document.getElementById('startCamBtn');
+        const switchCamBtn = document.getElementById('switchCamBtn');
+        const fileInput = document.getElementById('fileInput');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const scanOverlay = document.getElementById('scanOverlay');
+        const scanPercent = document.getElementById('scanPercent');
+
+        const responseCard = document.getElementById('responseCard');
+        const resAnalysis = document.getElementById('resAnalysis');
+        const resEarnedPoints = document.getElementById('resEarnedPoints');
+        const resTotalAndRank = document.getElementById('resTotalAndRank');
+        const resValorantQuote = document.getElementById('resValorantQuote');
+        const scanTimestamp = document.getElementById('scanTimestamp');
+        const resetDataBtn = document.getElementById('resetDataBtn');
+
+        updateRankUI();
+
+        document.querySelectorAll('.mat-select-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.mat-select-btn').forEach(b => {
+                    b.classList.remove('ring-2', 'ring-emerald-500', 'bg-slate-800');
+                });
+                const target = e.currentTarget;
+                target.classList.add('ring-2', 'ring-emerald-500', 'bg-slate-800');
+                selectedMaterial = target.getAttribute('data-type');
+                sfx.playScan();
+            });
+        });
+
+        startCamBtn.addEventListener('click', async () => {
+            try {
+                if (videoStream) {
+                    stopCamera();
+                }
+                const constraints = { video: { facingMode: facingMode } };
+                videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                webcam.srcObject = videoStream;
+                webcam.classList.remove('hidden');
+                imagePreview.classList.add('hidden');
+                placeholderUI.classList.add('hidden');
+                switchCamBtn.classList.remove('hidden');
+                startCamBtn.innerHTML = `<i class="fa-solid fa-video-slash text-rose-400"></i><span>Kamerayı Kapat</span>`;
+            } catch (err) {
+                alert("Kamera erişimi sağlanamadı.");
+            }
+        });
+
+        switchCamBtn.addEventListener('click', () => {
+            facingMode = facingMode === 'environment' ? 'user' : 'environment';
+            startCamBtn.click();
+        });
+
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            webcam.classList.add('hidden');
+            switchCamBtn.classList.add('hidden');
+            startCamBtn.innerHTML = `<i class="fa-solid fa-camera text-emerald-400"></i><span>Kamerayı Aç</span>`;
+        }
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                stopCamera();
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    imagePreview.src = event.target.result;
+                    imagePreview.classList.remove('hidden');
+                    placeholderUI.classList.add('hidden');
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            const hasImage = !imagePreview.classList.contains('hidden') && imagePreview.src;
+            const hasVideo = !webcam.classList.contains('hidden') && webcam.readyState === 4;
+
+            if (!hasImage && !hasVideo) {
+                alert("Lütfen önce kamerayı açın ya da galeriden bir resim seçin!");
+                return;
+            }
+
+            scanOverlay.classList.remove('hidden');
+            sfx.playScan();
+            
+            let percent = 0;
+            const interval = setInterval(async () => {
+                percent += 25;
+                scanPercent.innerText = percent + '%';
+                if (percent >= 100) {
+                    clearInterval(interval);
+                    scanOverlay.classList.add('hidden');
+                    await processRecyclingPoints();
+                }
+            }, 120);
+        });
+
+        async function detectImageContent() {
+            if (!aiModel) return { type: selectedMaterial === 'auto' ? 'invalid' : selectedMaterial, confidence: 0 };
+
+            let elementToAnalyze = imagePreview;
+            if (!webcam.classList.contains('hidden')) {
+                elementToAnalyze = webcam;
+            }
+
+            try {
+                const predictions = await aiModel.classify(elementToAnalyze);
+
+                const petKeywords = ['pop bottle', 'soda bottle', 'water bottle', 'plastic bottle', 'bottle', 'beverage bottle'];
+                const glassKeywords = ['wine bottle', 'beer bottle', 'glass bottle', 'goblet', 'champagne', 'flask', 'beaker', 'vase'];
+                const plasticKeywords = ['pill bottle', 'container', 'lotion', 'bucket', 'water jug', 'jug', 'plastic'];
+
+                for (let pred of predictions) {
+                    const label = pred.className.toLowerCase();
+                    if (pred.probability > 0.08) {
+                        if (glassKeywords.some(k => label.includes(k))) return { type: 'glass', label: pred.className };
+                        if (petKeywords.some(k => label.includes(k))) return { type: 'pet', label: pred.className };
+                        if (plasticKeywords.some(k => label.includes(k))) return { type: 'plastic', label: pred.className };
+                    }
+                }
+                return { type: 'invalid', label: predictions[0] ? predictions[0].className : 'Tanımlanamayan Nesne' };
+            } catch (err) {
+                return { type: 'invalid', label: 'Tarama Hatası' };
+            }
+        }
+
+        function generateImageHash() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 16;
+            canvas.height = 16;
+
+            let sourceElem = imagePreview;
+            if (!webcam.classList.contains('hidden')) {
+                sourceElem = webcam;
+            }
+
+            ctx.drawImage(sourceElem, 0, 0, 16, 16);
+            const imgData = ctx.getImageData(0, 0, 16, 16).data;
+            
+            let grayValues = [];
+            let totalVal = 0;
+
+            for (let i = 0; i < imgData.length; i += 4) {
+                const gray = Math.floor(imgData[i] * 0.299 + imgData[i+1] * 0.587 + imgData[i+2] * 0.114);
+                grayValues.push(gray);
+                totalVal += gray;
+            }
+
+            const avg = totalVal / grayValues.length;
+            let hash = "";
+            for (let i = 0; i < grayValues.length; i++) {
+                hash += (grayValues[i] >= avg ? "1" : "0");
+            }
+            return hash;
+        }
+
+        function isDuplicateImage(newHash) {
+            for (let existingHash of scannedHashes) {
+                let diffCount = 0;
+                for (let i = 0; i < newHash.length; i++) {
+                    if (newHash[i] !== existingHash[i]) diffCount++;
+                }
+                if (diffCount <= 20) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        async function processRecyclingPoints() {
+            let detectedType = selectedMaterial;
+            let detectedLabelName = "";
+
+            const currentHash = generateImageHash();
+            const duplicateFound = isDuplicateImage(currentHash);
+
+            if (duplicateFound) {
+                sfx.playScan();
+                updateRankUI();
+
+                resAnalysis.innerHTML = `Analiz Sonucu: <strong class="text-rose-400">MÜKERRER ŞİŞE TESPİTİ!</strong> (Kategori: <span class="text-rose-400">Daha Önce Taratılmış</span>)`;
+                resEarnedPoints.innerText = `0 PUAN (KULLANILMIŞ ATIK)`;
+                resEarnedPoints.className = "text-2xl font-heading font-bold text-rose-400 leading-none";
+
+                const currentRank = getCurrentRank(totalScore);
+                resTotalAndRank.innerHTML = `Güncel Toplam Puan: <span class="text-sky-400">${totalScore} PTS</span> | Derece: <span class="text-emerald-400">${currentRank.name}</span>`;
+                resValorantQuote.innerText = `"Bu nesne veya fotoğraf daha önce sisteme taranmış. Puan kazanmak için lütfen yeni bir geri dönüşüm materyali tara!"`;
+
+                const now = new Date();
+                scanTimestamp.innerText = now.toLocaleTimeString();
+                responseCard.classList.remove('hidden');
+                responseCard.scrollIntoView({ behavior: 'smooth' });
+                return;
+            }
+
+            if (selectedMaterial === 'auto') {
+                const aiResult = await detectImageContent();
+                detectedType = aiResult.type;
+                detectedLabelName = aiResult.label || "";
+            }
+
+            let points = 0;
+            let materialName = "";
+            let categoryName = "";
+            let isValid = true;
+
+            if (detectedType === 'glass') {
+                points = 200;
+                materialName = "Cam Şişe / Nesne";
+                categoryName = "Cam";
+            } else if (detectedType === 'plastic') {
+                points = 100;
+                materialName = "Plastik Saklama / Şişe";
+                categoryName = "Plastik";
+            } else if (detectedType === 'pet') {
+                points = 50;
+                materialName = "PET Şişe";
+                categoryName = "PET";
+            } else {
+                isValid = false;
+                points = 0;
+                materialName = detectedLabelName ? `Algılanan: "${detectedLabelName}"` : "Tanımlanamayan Nesne";
+                categoryName = "GEÇERSİZ / ATIK DEĞİL";
+            }
+
+            const previousRank = getCurrentRank(totalScore);
+
+            if (isValid) {
+                totalScore += points;
+                localStorage.setItem('ecoRank_score', totalScore);
+
+                scannedHashes.push(currentHash);
+                localStorage.setItem('ecoRank_hashes', JSON.stringify(scannedHashes));
+
+                saveCloudProgress();
+            }
+
+            const newRank = getCurrentRank(totalScore);
+
+            if (isValid) {
+                if (newRank.name !== previousRank.name) {
+                    sfx.playRankUp();
+                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                } else {
+                    sfx.playScore();
+                }
+            } else {
+                sfx.playScan();
+            }
+
+            updateRankUI();
+
+            if (isValid) {
+                resAnalysis.innerHTML = `Tespit Edilen Nesne: <strong>${materialName}</strong> (Kategori: <span class="text-emerald-400">${categoryName}</span>)`;
+                resEarnedPoints.innerText = `+${points} PUAN`;
+                resEarnedPoints.className = "text-2xl font-heading font-bold text-emerald-400 leading-none";
+            } else {
+                resAnalysis.innerHTML = `Analiz Sonucu: <strong class="text-rose-400">${materialName}</strong> (Kategori: <span class="text-rose-400">Geri Dönüştürülebilir Atık Değil</span>)`;
+                resEarnedPoints.innerText = `0 PUAN`;
+                resEarnedPoints.className = "text-2xl font-heading font-bold text-rose-400 leading-none";
+            }
+
+            const nextRankIndex = RANKS.findIndex(r => r.name === newRank.name) + 1;
+            const nextRank = RANKS[nextRankIndex];
+            let remainingText = "";
+
+            if (nextRank) {
+                const remaining = nextRank.min - totalScore;
+                remainingText = ` (Sonraki dereceye ${remaining > 0 ? remaining : 0} puan kaldı)`;
+            } else {
+                remainingText = " (Zirvedesin!)";
+            }
+
+            resTotalAndRank.innerHTML = `Güncel Toplam Puan: <span class="text-sky-400">${totalScore} PTS</span> | Derece: <span class="text-emerald-400">${newRank.name}</span>${remainingText}`;
+
+            if (isValid) {
+                const randomQuote = ECO_QUOTES[Math.floor(Math.random() * ECO_QUOTES.length)];
+                resValorantQuote.innerText = `"${randomQuote}"`;
+            } else {
+                resValorantQuote.innerText = `"Bu resimde geçerli bir PET, Cam veya Plastik atık algılanamadı. Lütfen geri dönüştürülebilir bir materyal çekin."`;
+            }
+
+            const now = new Date();
+            scanTimestamp.innerText = now.toLocaleTimeString();
+
+            responseCard.classList.remove('hidden');
+            responseCard.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function getCurrentRank(score) {
+            for (let i = RANKS.length - 1; i >= 0; i--) {
+                if (score >= RANKS[i].min) {
+                    return RANKS[i];
+                }
+            }
+            return RANKS[0];
+        }
+
+        function updateRankUI() {
+            const currentRank = getCurrentRank(totalScore);
+            const currentRankIndex = RANKS.findIndex(r => r.name === currentRank.name);
+            const nextRank = RANKS[currentRankIndex + 1];
+
+            totalScoreDisplay.innerText = `${totalScore} PTS`;
+            rankNameDisplay.innerText = currentRank.name.toUpperCase();
+            rankBadgeIcon.className = `text-2xl ${currentRank.color}`;
+            rankBadgeIcon.innerHTML = `<i class="fa-solid ${currentRank.icon}"></i>`;
+
+            if (nextRank) {
+                currentRankTierLabel.innerText = currentRank.name;
+                nextRankTierLabel.innerText = nextRank.name;
+
+                const tierSpan = nextRank.min - currentRank.min;
+                const currentProgress = totalScore - currentRank.min;
+                const percentage = Math.min(100, Math.max(0, (currentProgress / tierSpan) * 100));
+
+                rankProgressBar.style.width = `${percentage}%`;
+                const pointsNeeded = nextRank.min - totalScore;
+                pointsToNextDisplay.innerText = `Sonraki dereceye: ${pointsNeeded > 0 ? pointsNeeded : 0} Puan kaldı`;
+            } else {
+                currentRankTierLabel.innerText = currentRank.name;
+                nextRankTierLabel.innerText = "MAKSİMUM SEVİYE";
+                rankProgressBar.style.width = `100%`;
+                pointsToNextDisplay.innerText = "En yüksek geri dönüşüm seviyesine ulaşıldı!";
+            }
+        }
+
+        resetDataBtn.addEventListener('click', async () => {
+            if (confirm("Tüm puan ve ilerlemeniz sıfırlanacak. Onaylıyor musunuz?")) {
+                totalScore = 0;
+                scannedHashes = [];
+                localStorage.setItem('ecoRank_score', 0);
+                localStorage.setItem('ecoRank_hashes', JSON.stringify([]));
+                await saveCloudProgress();
+                updateRankUI();
+                responseCard.classList.add('hidden');
+                sfx.playScan();
+            }
+        });
+    </script>
+</body>
+</html>
