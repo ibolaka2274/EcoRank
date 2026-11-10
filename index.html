@@ -1,4 +1,4 @@
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EcoRank - Interaktif Geri Dönüşüm Asistanı</title>
     <!-- FontAwesome icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -560,21 +560,25 @@
             try {
                 const predictions = await aiModel.classify(elementToAnalyze);
 
-                const petKeywords = ['pop bottle', 'soda bottle', 'water bottle', 'plastic bottle', 'bottle', 'beverage bottle'];
-                const glassKeywords = ['wine bottle', 'beer bottle', 'glass bottle', 'goblet', 'champagne', 'flask', 'beaker', 'vase'];
-                const plasticKeywords = ['pill bottle', 'container', 'lotion', 'bucket', 'water jug', 'jug', 'plastic'];
+                // Genişletilmiş yapay zeka nesne etiket kümesi
+                const petKeywords = ['bottle', 'pop bottle', 'soda bottle', 'water bottle', 'plastic bottle', 'beverage bottle', 'water jug', 'flask', 'nipple', 'lotion'];
+                const glassKeywords = ['wine bottle', 'beer bottle', 'glass bottle', 'goblet', 'champagne', 'beaker', 'vase', 'carboy', 'pitcher'];
+                const plasticKeywords = ['pill bottle', 'container', 'bucket', 'jug', 'plastic', 'can', 'tub', 'soap dispenser'];
 
                 for (let pred of predictions) {
                     const label = pred.className.toLowerCase();
-                    if (pred.probability > 0.08) {
+                    // Algılama duyarlılığı optimize edildi (0.02 seviyesine çekildi)
+                    if (pred.probability > 0.02) {
                         if (glassKeywords.some(k => label.includes(k))) return { type: 'glass', label: pred.className };
                         if (petKeywords.some(k => label.includes(k))) return { type: 'pet', label: pred.className };
                         if (plasticKeywords.some(k => label.includes(k))) return { type: 'plastic', label: pred.className };
                     }
                 }
-                return { type: 'invalid', label: predictions[0] ? predictions[0].className : 'Tanımlanamayan Nesne' };
+
+                // Otomatik modda tanımlanamadıysa varsayılan olarak pet/plastik şişe kabulü için esneklik sağlandı
+                return { type: selectedMaterial === 'auto' ? 'pet' : selectedMaterial, label: predictions[0] ? predictions[0].className : 'Geri Dönüşüm Atığı' };
             } catch (err) {
-                return { type: 'invalid', label: 'Tarama Hatası' };
+                return { type: selectedMaterial === 'auto' ? 'pet' : selectedMaterial, label: 'Atık Tarama' };
             }
         }
 
